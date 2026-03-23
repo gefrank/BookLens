@@ -2,6 +2,29 @@
 
 ---
 
+## v0.5.0 — 2026-03-23
+
+Perspective Correction + Camera Cleanup — the Microsoft Lens edge-detection experience.
+
+### Added
+- New **Adjust Edges** screen with auto-detected page corners
+- Sobel edge detection algorithm finds page boundaries automatically
+- Four draggable corner handles with 36px touch targets
+- SVG overlay grays out area outside the detected page (like Lens)
+- Full perspective warp using 3×3 homography matrix with bilinear interpolation
+- **Tap-to-focus** on camera screen with animated focus ring indicator
+- Focus ring shows tap → lock → fade animation sequence
+
+### Removed
+- Selfie/flip camera button (app is scanning-only, always rear camera)
+- `facingMode` state variable (hardcoded to `environment`)
+
+### Changed
+- Flow is now: Capture/Import → **Adjust Edges** → Enhance → Crop → Save
+- Camera screen layout rebalanced after flip button removal
+
+---
+
 ## v0.4.0 — 2026-03-23
 
 Image Enhancement — the Microsoft Lens "document scan" look.
