@@ -2,6 +2,21 @@
 
 ---
 
+## v0.6.0 — 2026-03-23
+
+OCR — extract text from scanned quotes.
+
+### Added
+- Tesseract.js v4 integration (runs entirely in-browser via Web Worker)
+- "Aa" button on gallery items to extract text
+- OCR progress overlay with real-time progress bar
+- Editable textarea for fixing OCR mistakes before copying
+- Copy to clipboard button
+- Lazy worker initialization — language data (~10MB) only downloads on first OCR use
+- Language data cached by service worker for offline use after first download
+
+---
+
 ## v0.5.0 — 2026-03-23
 
 Perspective Correction + Camera Cleanup — the Microsoft Lens edge-detection experience.

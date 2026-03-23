@@ -8,6 +8,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#1a1208">
 <link rel="manifest" href="manifest.json">
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
 <title>BookLens</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@300;400&display=swap');
@@ -407,6 +408,64 @@
   }
   .empty-gallery p:first-child { font-size: 32px; margin-bottom: 16px; }
 
+  /* ── OCR OVERLAY ── */
+  #ocrOverlay {
+    position: fixed; inset: 0;
+    background: rgba(10,8,5,0.95);
+    display: flex; flex-direction: column;
+    z-index: 500;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.3s;
+  }
+  #ocrOverlay.show { opacity: 1; pointer-events: auto; }
+  .ocr-header {
+    background: #0f0b05;
+    border-bottom: 1px solid var(--amber-dim);
+    padding: 12px 16px;
+    display: flex; align-items: center; gap: 10px;
+    flex-shrink: 0;
+  }
+  .ocr-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 16px; color: var(--amber-light); flex: 1;
+  }
+  .ocr-body {
+    flex: 1; display: flex; flex-direction: column;
+    padding: 16px; gap: 12px; overflow: hidden;
+  }
+  #ocrText {
+    flex: 1; resize: none;
+    background: #1a1208; color: var(--paper);
+    border: 1px solid var(--amber-dim); border-radius: 3px;
+    padding: 14px; font-family: 'JetBrains Mono', monospace;
+    font-size: 13px; line-height: 1.6;
+    outline: none;
+  }
+  #ocrText:focus { border-color: var(--amber); }
+  .ocr-actions {
+    display: flex; gap: 8px; flex-shrink: 0;
+  }
+  .ocr-actions button {
+    flex: 1;
+  }
+  .ocr-progress {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 12px; flex: 1;
+  }
+  .ocr-progress-bar {
+    width: 80%; max-width: 300px; height: 4px;
+    background: #2e2210; border-radius: 2px; overflow: hidden;
+  }
+  .ocr-progress-fill {
+    height: 100%; background: var(--amber-light);
+    border-radius: 2px; transition: width 0.2s;
+    width: 0%;
+  }
+  .ocr-progress-label {
+    font-size: 11px; color: var(--amber-dim);
+    letter-spacing: 0.5px; text-transform: uppercase;
+  }
+
   /* ── TOAST ── */
   #toast {
     position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
@@ -556,6 +615,27 @@
     <button class="header-btn" onclick="showScreen('home')">← Back</button>
   </div>
   <div class="gallery-grid" id="galleryGrid"></div>
+</div>
+
+<!-- OCR OVERLAY -->
+<div id="ocrOverlay">
+  <div class="ocr-header">
+    <span class="ocr-title">Extracted Text</span>
+    <button class="crop-btn" onclick="closeOCR()">Close</button>
+  </div>
+  <div class="ocr-body" id="ocrBody">
+    <div class="ocr-progress" id="ocrProgress">
+      <div class="ocr-progress-bar">
+        <div class="ocr-progress-fill" id="ocrProgressFill"></div>
+      </div>
+      <span class="ocr-progress-label" id="ocrProgressLabel">Initializing...</span>
+    </div>
+    <textarea id="ocrText" style="display:none" placeholder="Recognized text will appear here..."></textarea>
+    <div class="ocr-actions" id="ocrActions" style="display:none">
+      <button class="crop-btn" onclick="copyOCRText()">Copy</button>
+      <button class="crop-btn primary" onclick="closeOCR()">Done</button>
+    </div>
+  </div>
 </div>
 
 <div id="toast"></div>
@@ -1332,6 +1412,7 @@ function renderGallery() {
     <div class="gallery-item" onclick="toggleSelected(this)">
       <img src="${item.dataURL}" alt="saved quote">
       <div class="gallery-item-actions">
+        <button class="item-btn" onclick="event.stopPropagation();extractText(${i})">Aa</button>
         <button class="item-btn" onclick="event.stopPropagation();downloadItem('${item.id}')">↓</button>
         <button class="item-btn" onclick="event.stopPropagation();reCrop(${i})">✂</button>
         <button class="item-btn" onclick="event.stopPropagation();deleteItem('${item.id}')">✕</button>
@@ -1362,6 +1443,79 @@ function deleteItem(id) {
   localStorage.setItem('booklens_saves', JSON.stringify(saved));
   renderGallery(); updateCount();
   showToast('Deleted');
+}
+
+// ── OCR ──
+// lazy-init the Tesseract worker so we only load the ~10MB language data on first use
+let ocrWorker = null;
+
+async function getOCRWorker() {
+  if (!ocrWorker) {
+    ocrWorker = await Tesseract.createWorker('eng', 1, {
+      logger: (m) => {
+        // update the progress bar during recognition
+        if (m.status === 'recognizing text') {
+          const pct = Math.round(m.progress * 100);
+          document.getElementById('ocrProgressFill').style.width = pct + '%';
+          document.getElementById('ocrProgressLabel').textContent = 'Recognizing... ' + pct + '%';
+        } else if (m.status === 'loading language traineddata') {
+          const pct = Math.round(m.progress * 100);
+          document.getElementById('ocrProgressFill').style.width = pct + '%';
+          document.getElementById('ocrProgressLabel').textContent = 'Loading language data... ' + pct + '%';
+        }
+      }
+    });
+  }
+  return ocrWorker;
+}
+
+// kick off OCR on a gallery item
+async function extractText(idx) {
+  const item = saved[idx];
+  if (!item) return;
+
+  // show the overlay with progress bar
+  const overlay = document.getElementById('ocrOverlay');
+  const progress = document.getElementById('ocrProgress');
+  const textArea = document.getElementById('ocrText');
+  const actions = document.getElementById('ocrActions');
+
+  progress.style.display = 'flex';
+  textArea.style.display = 'none';
+  actions.style.display = 'none';
+  document.getElementById('ocrProgressFill').style.width = '0%';
+  document.getElementById('ocrProgressLabel').textContent = 'Initializing...';
+  overlay.classList.add('show');
+
+  try {
+    const worker = await getOCRWorker();
+    const { data: { text } } = await worker.recognize(item.dataURL);
+
+    // show the result in an editable textarea so the user can fix OCR mistakes
+    textArea.value = text.trim();
+    progress.style.display = 'none';
+    textArea.style.display = 'block';
+    actions.style.display = 'flex';
+  } catch(e) {
+    showToast('OCR failed — try again');
+    overlay.classList.remove('show');
+  }
+}
+
+function copyOCRText() {
+  const text = document.getElementById('ocrText').value;
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('Copied to clipboard');
+  }).catch(() => {
+    // fallback for older browsers
+    document.getElementById('ocrText').select();
+    document.execCommand('copy');
+    showToast('Copied to clipboard');
+  });
+}
+
+function closeOCR() {
+  document.getElementById('ocrOverlay').classList.remove('show');
 }
 
 // ── TOAST ──
