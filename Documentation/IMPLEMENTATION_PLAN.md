@@ -89,6 +89,33 @@ Single HTML file (`BookLens.html`) with:
 
 ---
 
+## Phase 3.5 — Perspective Correction
+
+**Goal:** Replicate Microsoft Lens's signature feature — detect page edges and straighten the perspective so a crooked phone photo becomes a clean, flat rectangle.
+
+### Deliverables
+- **Auto-detect mode** — find the four corners of the page/document automatically using edge detection
+- **Manual adjust** — drag the four corner points if auto-detect isn't perfect
+- **Perspective warp** — apply a four-point homography transform to flatten the image into a clean rectangle
+- Integrated into the flow between capture and enhancement: Capture → **Perspective** → Enhance → Crop
+
+### Implementation notes
+- Edge detection: convert to grayscale, apply Sobel/Canny-style filter via `getImageData`, find dominant contour lines using Hough-like approach
+- Four-point transform: compute 3×3 homography matrix from source corners → destination rectangle, apply via pixel remapping on canvas
+- All processing via Canvas 2D — no external libraries
+- Preview: show the detected corners as draggable amber dots overlaid on the image, with connecting lines
+- "Skip" button if the user doesn't need perspective correction (e.g. already flat)
+- Output is a new rectangular image at the correct aspect ratio, fed into enhancement/crop
+
+### Acceptance criteria
+- Auto-detect finds correct page boundaries on a typical book photo (high contrast background)
+- Manual corner adjustment is smooth and responsive on mobile (44px+ touch targets)
+- Perspective-corrected output has no visible warping artifacts
+- Processing completes in <1 second on a mid-range phone
+- Works correctly with both light pages on dark backgrounds and vice versa
+
+---
+
 ## Phase 4 — OCR (Text Extraction)
 
 **Goal:** Extract quote text from cropped images directly in the browser.
