@@ -9,6 +9,7 @@
 <meta name="theme-color" content="#1a1208">
 <link rel="manifest" href="manifest.json">
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <title>BookLens</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@300;400&display=swap');
@@ -408,6 +409,36 @@
   }
   .empty-gallery p:first-child { font-size: 32px; margin-bottom: 16px; }
 
+  /* batch selection mode */
+  .gallery-item .select-check {
+    position: absolute; top: 8px; left: 8px;
+    width: 24px; height: 24px; border-radius: 50%;
+    border: 2px solid var(--amber-dim);
+    background: rgba(0,0,0,0.5);
+    display: none; align-items: center; justify-content: center;
+    font-size: 14px; color: var(--amber-light); z-index: 3;
+  }
+  .gallery.batch-mode .select-check { display: flex; }
+  .gallery-item.checked .select-check {
+    background: var(--amber); border-color: var(--amber-light);
+    color: var(--ink);
+  }
+  .gallery-item.checked { border-color: var(--amber); }
+
+  /* batch toolbar at bottom of gallery */
+  .batch-toolbar {
+    background: #0f0b05;
+    border-top: 1px solid var(--amber-dim);
+    padding: 10px 16px;
+    display: none; align-items: center; gap: 8px;
+    flex-shrink: 0;
+  }
+  .gallery.batch-mode .batch-toolbar { display: flex; }
+  .batch-count {
+    font-size: 11px; color: var(--amber-dim); flex: 1;
+    letter-spacing: 0.5px;
+  }
+
   /* ── OCR OVERLAY ── */
   #ocrOverlay {
     position: fixed; inset: 0;
@@ -612,9 +643,16 @@
 <div id="gallery" class="screen hidden">
   <div class="header">
     <span class="logo">Book<span>Lens</span> — Library</span>
+    <button class="header-btn" id="batchToggleBtn" onclick="toggleBatchMode()">Select</button>
     <button class="header-btn" onclick="showScreen('home')">← Back</button>
   </div>
   <div class="gallery-grid" id="galleryGrid"></div>
+  <div class="batch-toolbar">
+    <span class="batch-count" id="batchCount">0 selected</span>
+    <button class="crop-btn" onclick="batchShare()">Share</button>
+    <button class="crop-btn" onclick="batchZip()">ZIP ↓</button>
+    <button class="crop-btn" onclick="batchDelete()">Delete</button>
+  </div>
 </div>
 
 <!-- OCR OVERLAY -->
@@ -1409,11 +1447,13 @@ function renderGallery() {
     return;
   }
   grid.innerHTML = saved.map((item, i) => `
-    <div class="gallery-item" onclick="toggleSelected(this)">
+    <div class="gallery-item" data-idx="${i}" onclick="onGalleryItemTap(this)">
+      <div class="select-check">✓</div>
       <img src="${item.dataURL}" alt="saved quote">
       <div class="gallery-item-actions">
+        <button class="item-btn" onclick="event.stopPropagation();shareItem(${i})">Share</button>
         <button class="item-btn" onclick="event.stopPropagation();extractText(${i})">Aa</button>
-        <button class="item-btn" onclick="event.stopPropagation();downloadItem('${item.id}')">↓</button>
+        <button class="item-btn" onclick="event.stopPropagation();copyImage(${i})">Copy</button>
         <button class="item-btn" onclick="event.stopPropagation();reCrop(${i})">✂</button>
         <button class="item-btn" onclick="event.stopPropagation();deleteItem('${item.id}')">✕</button>
       </div>
@@ -1421,8 +1461,14 @@ function renderGallery() {
   `).join('');
 }
 
-function toggleSelected(el) {
-  el.classList.toggle('selected');
+// tapping a gallery item either toggles selection (batch mode) or shows actions
+function onGalleryItemTap(el) {
+  if (batchMode) {
+    el.classList.toggle('checked');
+    updateBatchCount();
+  } else {
+    el.classList.toggle('selected');
+  }
 }
 
 function downloadItem(id) {
@@ -1443,6 +1489,145 @@ function deleteItem(id) {
   localStorage.setItem('booklens_saves', JSON.stringify(saved));
   renderGallery(); updateCount();
   showToast('Deleted');
+}
+
+// ── SHARE & EXPORT ──
+// convert a dataURL to a File object for the share/clipboard APIs
+function dataURLtoFile(dataURL, filename) {
+  const arr = dataURL.split(',');
+  const mime = arr[0].match(/:(.*?);/)[1];
+  const bstr = atob(arr[1]);
+  const u8arr = new Uint8Array(bstr.length);
+  for (let i = 0; i < bstr.length; i++) u8arr[i] = bstr.charCodeAt(i);
+  return new File([u8arr], filename, { type: mime });
+}
+
+// share a single image via the Android share sheet (Google Drive, Keep, etc.)
+async function shareItem(idx) {
+  const item = saved[idx];
+  if (!item) return;
+
+  const file = dataURLtoFile(item.dataURL, `booklens_${item.id}.jpg`);
+
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({
+        files: [file],
+        title: 'BookLens Quote'
+      });
+    } catch(e) {
+      // user cancelled the share sheet, that's fine
+      if (e.name !== 'AbortError') showToast('Share failed');
+    }
+  } else {
+    // fallback — just download it
+    downloadItem(item.id);
+    showToast('Share not supported — downloaded instead');
+  }
+}
+
+// copy image to clipboard
+async function copyImage(idx) {
+  const item = saved[idx];
+  if (!item) return;
+
+  try {
+    const blob = await (await fetch(item.dataURL)).blob();
+    await navigator.clipboard.write([
+      new ClipboardItem({ [blob.type]: blob })
+    ]);
+    showToast('Image copied');
+  } catch(e) {
+    // some browsers don't support clipboard image write
+    showToast('Copy not supported on this device');
+  }
+}
+
+// ── BATCH MODE ──
+let batchMode = false;
+
+function toggleBatchMode() {
+  batchMode = !batchMode;
+  const gallery = document.getElementById('gallery');
+  const btn = document.getElementById('batchToggleBtn');
+
+  if (batchMode) {
+    gallery.classList.add('batch-mode');
+    btn.textContent = 'Cancel';
+    // clear any previous selections
+    gallery.querySelectorAll('.gallery-item.checked').forEach(el => el.classList.remove('checked'));
+    updateBatchCount();
+  } else {
+    gallery.classList.remove('batch-mode');
+    btn.textContent = 'Select';
+  }
+}
+
+function updateBatchCount() {
+  const count = document.querySelectorAll('.gallery-item.checked').length;
+  document.getElementById('batchCount').textContent = count + ' selected';
+}
+
+function getCheckedIndices() {
+  const items = document.querySelectorAll('.gallery-item.checked');
+  return Array.from(items).map(el => Number(el.dataset.idx));
+}
+
+// share multiple images at once
+async function batchShare() {
+  const indices = getCheckedIndices();
+  if (!indices.length) { showToast('Select some items first'); return; }
+
+  const files = indices.map(i => dataURLtoFile(saved[i].dataURL, `booklens_${saved[i].id}.jpg`));
+
+  if (navigator.canShare && navigator.canShare({ files })) {
+    try {
+      await navigator.share({ files, title: 'BookLens Quotes' });
+    } catch(e) {
+      if (e.name !== 'AbortError') showToast('Share failed');
+    }
+  } else {
+    showToast('Multi-share not supported — use ZIP instead');
+  }
+}
+
+// download selected items as a ZIP file
+async function batchZip() {
+  const indices = getCheckedIndices();
+  if (!indices.length) { showToast('Select some items first'); return; }
+
+  showToast('Creating ZIP...');
+  const zip = new JSZip();
+
+  indices.forEach(i => {
+    const item = saved[i];
+    // strip the dataURL header to get raw base64
+    const base64 = item.dataURL.split(',')[1];
+    zip.file(`booklens_${item.id}.jpg`, base64, { base64: true });
+  });
+
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `booklens_export_${Date.now()}.zip`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('ZIP downloaded');
+}
+
+// delete all selected items
+function batchDelete() {
+  const indices = getCheckedIndices();
+  if (!indices.length) { showToast('Select some items first'); return; }
+
+  // remove from highest index first so splicing doesn't shift lower indices
+  indices.sort((a, b) => b - a).forEach(i => saved.splice(i, 1));
+  localStorage.setItem('booklens_saves', JSON.stringify(saved));
+  toggleBatchMode();
+  renderGallery();
+  updateCount();
+  showToast('Deleted ' + indices.length + ' items');
 }
 
 // ── OCR ──

@@ -129,7 +129,7 @@ See `IMPLEMENTATION_PLAN.md` for full detail. Summary:
 | 3     | Image enhancement        | ✅ Complete |
 | 3.5   | Perspective correction   | ❌ Cut      |
 | 4     | OCR (Tesseract.js)       | ✅ Complete |
-| 5     | Share & export           | ⬜          |
+| 5     | Share & export           | ✅ Complete |
 
 ---
 

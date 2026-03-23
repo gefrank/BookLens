@@ -2,6 +2,27 @@
 
 ---
 
+## v0.7.0 — 2026-03-23
+
+Share & Export — get quotes out of the app and into Google Drive, Keep, etc.
+
+### Added
+- **Share** button on each gallery item — opens Android share sheet (Google Drive, Keep, Signal, etc.)
+- **Copy** button — copies image to clipboard
+- **Batch select mode** — tap "Select" in gallery header, check multiple items
+- **Batch Share** — share multiple images at once via share sheet
+- **Batch ZIP** — download selected items as a single ZIP file (JSZip)
+- **Batch Delete** — remove multiple items at once
+- Selection checkmarks and highlighted borders in batch mode
+- Batch toolbar with count, Share, ZIP, and Delete buttons
+- JSZip CDN dependency added
+
+### Changed
+- Gallery item actions now show: Share, Aa (OCR), Copy, Crop, Delete
+- Gallery items in batch mode toggle checkmarks on tap instead of showing actions
+
+---
+
 ## v0.6.0 — 2026-03-23
 
 OCR — extract text from scanned quotes.
