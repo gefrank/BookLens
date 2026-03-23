@@ -1451,20 +1451,19 @@ let ocrWorker = null;
 
 async function getOCRWorker() {
   if (!ocrWorker) {
-    ocrWorker = await Tesseract.createWorker('eng', 1, {
+    // Tesseract.js v4 — create worker with progress logging
+    ocrWorker = await Tesseract.createWorker({
       logger: (m) => {
-        // update the progress bar during recognition
-        if (m.status === 'recognizing text') {
+        if (m.progress !== undefined) {
           const pct = Math.round(m.progress * 100);
           document.getElementById('ocrProgressFill').style.width = pct + '%';
-          document.getElementById('ocrProgressLabel').textContent = 'Recognizing... ' + pct + '%';
-        } else if (m.status === 'loading language traineddata') {
-          const pct = Math.round(m.progress * 100);
-          document.getElementById('ocrProgressFill').style.width = pct + '%';
-          document.getElementById('ocrProgressLabel').textContent = 'Loading language data... ' + pct + '%';
+          document.getElementById('ocrProgressLabel').textContent =
+            (m.status || 'Processing') + '... ' + pct + '%';
         }
       }
     });
+    await ocrWorker.loadLanguage('eng');
+    await ocrWorker.initialize('eng');
   }
   return ocrWorker;
 }
@@ -1497,6 +1496,7 @@ async function extractText(idx) {
     textArea.style.display = 'block';
     actions.style.display = 'flex';
   } catch(e) {
+    console.error('OCR error:', e);
     showToast('OCR failed — try again');
     overlay.classList.remove('show');
   }
