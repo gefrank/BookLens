@@ -154,19 +154,6 @@
   }
   #canvas { display: none; }
 
-  /* live edge detection overlay on the camera viewfinder */
-  #cameraWrap {
-    position: relative; flex: 1; overflow: hidden;
-  }
-  #cameraWrap video {
-    width: 100%; height: 100%; object-fit: cover; display: block;
-  }
-  #edgeOverlay {
-    position: absolute; inset: 0;
-    pointer-events: none;
-    z-index: 2;
-  }
-
   /* ── CROP ── */
   #crop {
     background: #0a0805;
@@ -298,70 +285,6 @@
     -webkit-appearance: none; width: 16px; height: 16px;
     border-radius: 50%; background: var(--amber-light);
     cursor: pointer;
-  }
-
-  /* ── PERSPECTIVE ── */
-  #perspective {
-    background: #0a0805;
-    overflow: hidden;
-  }
-  .persp-header {
-    background: #0f0b05;
-    border-bottom: 1px solid var(--amber-dim);
-    padding: 12px 16px;
-    display: flex; align-items: center; gap: 10px;
-    flex-shrink: 0;
-  }
-  .persp-title {
-    font-family: 'Playfair Display', serif;
-    font-size: 16px; color: var(--amber-light); flex: 1;
-  }
-  .persp-workspace {
-    flex: 1;
-    display: flex; align-items: center; justify-content: center;
-    overflow: hidden;
-    position: relative;
-    background: #050402;
-    touch-action: none;
-  }
-  #perspCanvas {
-    max-width: 100%; max-height: 100%;
-    display: block;
-  }
-  /* SVG overlay for the quad outline and grayed-out mask */
-  #perspOverlay {
-    position: absolute; inset: 0;
-    pointer-events: none;
-  }
-  /* draggable corner handles */
-  .persp-handle {
-    position: absolute;
-    width: 36px; height: 36px;
-    border: 3px solid var(--amber-light);
-    border-radius: 50%;
-    background: rgba(200,144,42,0.25);
-    transform: translate(-50%, -50%);
-    cursor: grab;
-    touch-action: none;
-    z-index: 10;
-  }
-  .persp-handle:active { cursor: grabbing; background: rgba(200,144,42,0.5); }
-  .persp-handle::after {
-    content: ''; position: absolute;
-    top: 50%; left: 50%; transform: translate(-50%,-50%);
-    width: 8px; height: 8px; border-radius: 50%;
-    background: var(--amber-light);
-  }
-  .persp-footer {
-    background: #0f0b05;
-    border-top: 1px solid #2e2210;
-    padding: 12px 16px;
-    display: flex; align-items: center; justify-content: center; gap: 12px;
-    flex-shrink: 0;
-  }
-  .persp-hint {
-    font-size: 10px; color: var(--amber-dim); letter-spacing: 0.5px;
-    text-align: center;
   }
 
   /* ── ENHANCE ── */
@@ -539,10 +462,7 @@
 
 <!-- CAMERA -->
 <div id="camera" class="screen hidden">
-  <div id="cameraWrap">
-    <video id="video" autoplay playsinline muted></video>
-    <canvas id="edgeOverlay"></canvas>
-  </div>
+  <video id="video" autoplay playsinline muted></video>
   <canvas id="canvas"></canvas>
   <div class="camera-controls">
     <button class="cam-side-btn" onclick="stopCamera(); showScreen('home')" title="Back">✕</button>
@@ -550,28 +470,6 @@
       <div class="shutter-inner"></div>
     </button>
     <div style="width:48px;"></div>
-  </div>
-</div>
-
-<!-- PERSPECTIVE -->
-<div id="perspective" class="screen hidden">
-  <div class="persp-header">
-    <span class="persp-title">Adjust Edges</span>
-    <button class="crop-btn" onclick="skipPerspective()">Skip</button>
-    <button class="crop-btn primary" onclick="applyPerspective()">Straighten</button>
-  </div>
-
-  <div class="persp-workspace" id="perspWorkspace">
-    <canvas id="perspCanvas"></canvas>
-    <svg id="perspOverlay" xmlns="http://www.w3.org/2000/svg"></svg>
-    <div class="persp-handle" id="perspTL" data-corner="0"></div>
-    <div class="persp-handle" id="perspTR" data-corner="1"></div>
-    <div class="persp-handle" id="perspBR" data-corner="2"></div>
-    <div class="persp-handle" id="perspBL" data-corner="3"></div>
-  </div>
-
-  <div class="persp-footer">
-    <span class="persp-hint">Drag the corners to match the page edges</span>
   </div>
 </div>
 
@@ -702,31 +600,14 @@ function updateCount() {
 }
 
 // ── CAMERA ──
-let edgeDetectTimer = null;
-let lastDetectedQuad = null; // smoothed quad corners for the overlay
-
 async function startCamera() {
   showScreen('camera');
   try {
-    // always use the rear camera — this app is for scanning documents
     stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'environment', width: { ideal: 2048 }, height: { ideal: 2048 } },
       audio: false
     });
-    const video = document.getElementById('video');
-    video.srcObject = stream;
-
-    // once video is playing, request continuous autofocus if the device supports it
-    video.addEventListener('loadedmetadata', () => {
-      const track = stream.getVideoTracks()[0];
-      const caps = track.getCapabilities ? track.getCapabilities() : {};
-      if (caps.focusMode && caps.focusMode.includes('continuous')) {
-        track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
-      }
-    }, { once: true });
-
-    // start the live edge detection loop
-    startEdgeDetection();
+    document.getElementById('video').srcObject = stream;
   } catch(e) {
     showToast('Camera access denied');
     showScreen('home');
@@ -735,116 +616,6 @@ async function startCamera() {
 
 function stopCamera() {
   if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-  stopEdgeDetection();
-}
-
-// ── LIVE EDGE DETECTION ──
-// runs every ~300ms, grabs a frame from the video, detects edges, draws the overlay
-
-function startEdgeDetection() {
-  stopEdgeDetection();
-  lastDetectedQuad = null;
-  edgeDetectTimer = setInterval(detectEdgesFromVideo, 300);
-}
-
-function stopEdgeDetection() {
-  if (edgeDetectTimer) { clearInterval(edgeDetectTimer); edgeDetectTimer = null; }
-  // clear the overlay when leaving camera
-  const overlay = document.getElementById('edgeOverlay');
-  if (overlay) {
-    const ctx = overlay.getContext('2d');
-    ctx.clearRect(0, 0, overlay.width, overlay.height);
-  }
-}
-
-function detectEdgesFromVideo() {
-  const video = document.getElementById('video');
-  if (!video || video.readyState < 2 || !stream) return;
-
-  // downsample to a small canvas for fast processing
-  const sampleW = 240;
-  const sampleH = Math.round(sampleW * (video.videoHeight / video.videoWidth));
-  const tmpCanvas = document.createElement('canvas');
-  tmpCanvas.width = sampleW;
-  tmpCanvas.height = sampleH;
-  const tmpCtx = tmpCanvas.getContext('2d');
-  tmpCtx.drawImage(video, 0, 0, sampleW, sampleH);
-
-  // run edge detection on the small frame
-  const quad = detectPageEdges(tmpCanvas);
-
-  // smooth the corners so the overlay doesn't jitter too much between frames
-  if (quad) {
-    if (lastDetectedQuad) {
-      // lerp toward the new detection for stability
-      const smooth = 0.4;
-      lastDetectedQuad = lastDetectedQuad.map((prev, i) => ({
-        x: prev.x + (quad[i].x - prev.x) * smooth,
-        y: prev.y + (quad[i].y - prev.y) * smooth
-      }));
-    } else {
-      lastDetectedQuad = quad;
-    }
-  }
-  // if no quad detected, keep showing the last one (or nothing)
-
-  drawEdgeOverlay();
-}
-
-function drawEdgeOverlay() {
-  const overlay = document.getElementById('edgeOverlay');
-  const wrap = document.getElementById('cameraWrap');
-  if (!overlay || !wrap) return;
-
-  const w = wrap.clientWidth;
-  const h = wrap.clientHeight;
-  overlay.width = w;
-  overlay.height = h;
-
-  const ctx = overlay.getContext('2d');
-  ctx.clearRect(0, 0, w, h);
-
-  if (!lastDetectedQuad) return;
-
-  // convert fractional coordinates to pixel coordinates on the overlay
-  const pts = lastDetectedQuad.map(c => ({ x: c.x * w, y: c.y * h }));
-
-  // draw the semi-transparent grey mask outside the detected page
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
-  ctx.beginPath();
-  // outer rectangle (full frame)
-  ctx.moveTo(0, 0);
-  ctx.lineTo(w, 0);
-  ctx.lineTo(w, h);
-  ctx.lineTo(0, h);
-  ctx.closePath();
-  // inner quad (the page) — wound in reverse so it cuts a hole
-  ctx.moveTo(pts[0].x, pts[0].y);
-  ctx.lineTo(pts[3].x, pts[3].y);
-  ctx.lineTo(pts[2].x, pts[2].y);
-  ctx.lineTo(pts[1].x, pts[1].y);
-  ctx.closePath();
-  ctx.fill('evenodd');
-
-  // draw the quad border
-  ctx.strokeStyle = '#e8b84b';
-  ctx.lineWidth = 2.5;
-  ctx.setLineDash([]);
-  ctx.beginPath();
-  ctx.moveTo(pts[0].x, pts[0].y);
-  ctx.lineTo(pts[1].x, pts[1].y);
-  ctx.lineTo(pts[2].x, pts[2].y);
-  ctx.lineTo(pts[3].x, pts[3].y);
-  ctx.closePath();
-  ctx.stroke();
-
-  // draw corner dots so the user can see the anchor points
-  ctx.fillStyle = '#e8b84b';
-  pts.forEach(p => {
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
-    ctx.fill();
-  });
 }
 
 function capturePhoto() {
@@ -855,7 +626,7 @@ function capturePhoto() {
   canvas.getContext('2d').drawImage(video, 0, 0);
   const dataURL = canvas.toDataURL('image/jpeg', 0.95);
   stopCamera();
-  openPerspective(dataURL);
+  openEnhance(dataURL);
 }
 
 // ── FILE IMPORT ──
@@ -863,382 +634,9 @@ document.getElementById('fileInput').addEventListener('change', e => {
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = ev => openPerspective(ev.target.result);
+  reader.onload = ev => openEnhance(ev.target.result);
   reader.readAsDataURL(file);
   e.target.value = '';
-});
-
-// ── PERSPECTIVE CORRECTION ──
-// the four corners of the detected page, stored as fractions (0–1) of image dimensions
-let perspCorners = [
-  { x: 0.05, y: 0.05 },  // top-left
-  { x: 0.95, y: 0.05 },  // top-right
-  { x: 0.95, y: 0.95 },  // bottom-right
-  { x: 0.05, y: 0.95 }   // bottom-left
-];
-let perspSourceDataURL = null;
-let perspSourceImg = null;
-
-function openPerspective(dataURL) {
-  perspSourceDataURL = dataURL;
-  perspSourceImg = new Image();
-  perspSourceImg.onload = () => {
-    // draw the image onto the perspective canvas
-    const canvas = document.getElementById('perspCanvas');
-    const maxDim = 1200;
-    const scale = Math.min(1, maxDim / Math.max(perspSourceImg.naturalWidth, perspSourceImg.naturalHeight));
-    canvas.width = Math.round(perspSourceImg.naturalWidth * scale);
-    canvas.height = Math.round(perspSourceImg.naturalHeight * scale);
-    canvas.getContext('2d').drawImage(perspSourceImg, 0, 0, canvas.width, canvas.height);
-
-    // use the quad from the live camera detection if we have it,
-    // otherwise run detection fresh (e.g. for imported images)
-    if (lastDetectedQuad) {
-      perspCorners = lastDetectedQuad.map(c => ({ ...c }));
-      lastDetectedQuad = null;
-    } else {
-      perspCorners = detectPageEdges(canvas) || [
-        { x: 0.05, y: 0.05 }, { x: 0.95, y: 0.05 },
-        { x: 0.95, y: 0.95 }, { x: 0.05, y: 0.95 }
-      ];
-    }
-
-    showScreen('perspective');
-    // need a solid delay so the screen transition finishes and layout is stable
-    // before we try to read getBoundingClientRect on the canvas
-    setTimeout(() => {
-      updatePerspOverlay();
-      updatePerspHandles();
-    }, 350);
-  };
-  perspSourceImg.src = dataURL;
-}
-
-// skip perspective — send the original straight to enhance
-function skipPerspective() {
-  openEnhance(perspSourceDataURL);
-}
-
-// apply the warp and send the corrected image to enhance
-function applyPerspective() {
-  const srcW = perspSourceImg.naturalWidth;
-  const srcH = perspSourceImg.naturalHeight;
-
-  // source corners in pixel coordinates
-  const src = perspCorners.map(c => ({ x: c.x * srcW, y: c.y * srcH }));
-
-  // figure out the output dimensions from the detected quad
-  const topW = Math.sqrt((src[1].x - src[0].x) ** 2 + (src[1].y - src[0].y) ** 2);
-  const botW = Math.sqrt((src[2].x - src[3].x) ** 2 + (src[2].y - src[3].y) ** 2);
-  const leftH = Math.sqrt((src[3].x - src[0].x) ** 2 + (src[3].y - src[0].y) ** 2);
-  const rightH = Math.sqrt((src[2].x - src[1].x) ** 2 + (src[2].y - src[1].y) ** 2);
-  const outW = Math.round(Math.max(topW, botW));
-  const outH = Math.round(Math.max(leftH, rightH));
-
-  // destination corners — a clean rectangle
-  const dst = [
-    { x: 0, y: 0 }, { x: outW, y: 0 },
-    { x: outW, y: outH }, { x: 0, y: outH }
-  ];
-
-  // compute the 3x3 perspective transform matrix
-  const matrix = computePerspectiveTransform(dst, src);
-
-  // warp each pixel from destination back to source
-  const outCanvas = document.createElement('canvas');
-  outCanvas.width = outW;
-  outCanvas.height = outH;
-  const outCtx = outCanvas.getContext('2d');
-
-  // draw source at full res into a temp canvas for pixel sampling
-  const tmpCanvas = document.createElement('canvas');
-  tmpCanvas.width = srcW;
-  tmpCanvas.height = srcH;
-  tmpCanvas.getContext('2d').drawImage(perspSourceImg, 0, 0);
-  const srcData = tmpCanvas.getContext('2d').getImageData(0, 0, srcW, srcH).data;
-
-  const outImg = outCtx.createImageData(outW, outH);
-  const outPx = outImg.data;
-
-  // for each pixel in the output, find where it came from in the source
-  for (let y = 0; y < outH; y++) {
-    for (let x = 0; x < outW; x++) {
-      // apply the inverse transform to find the source coordinate
-      const d = matrix[6] * x + matrix[7] * y + matrix[8];
-      const sx = (matrix[0] * x + matrix[1] * y + matrix[2]) / d;
-      const sy = (matrix[3] * x + matrix[4] * y + matrix[5]) / d;
-
-      // bilinear interpolation for smooth results
-      const sx0 = Math.floor(sx), sy0 = Math.floor(sy);
-      const sx1 = sx0 + 1, sy1 = sy0 + 1;
-      const fx = sx - sx0, fy = sy - sy0;
-
-      if (sx0 >= 0 && sx1 < srcW && sy0 >= 0 && sy1 < srcH) {
-        const i00 = (sy0 * srcW + sx0) * 4;
-        const i10 = (sy0 * srcW + sx1) * 4;
-        const i01 = (sy1 * srcW + sx0) * 4;
-        const i11 = (sy1 * srcW + sx1) * 4;
-        const oi = (y * outW + x) * 4;
-
-        for (let c = 0; c < 3; c++) {
-          outPx[oi + c] = Math.round(
-            srcData[i00 + c] * (1 - fx) * (1 - fy) +
-            srcData[i10 + c] * fx * (1 - fy) +
-            srcData[i01 + c] * (1 - fx) * fy +
-            srcData[i11 + c] * fx * fy
-          );
-        }
-        outPx[oi + 3] = 255;
-      }
-    }
-  }
-
-  outCtx.putImageData(outImg, 0, 0);
-  const correctedDataURL = outCanvas.toDataURL('image/jpeg', 0.95);
-  openEnhance(correctedDataURL);
-}
-
-// compute the 3x3 perspective transform matrix from 4 point correspondences
-// maps dst points to src points (inverse mapping for pixel sampling)
-function computePerspectiveTransform(dst, src) {
-  // set up the 8x8 system of equations
-  // each point pair gives two equations
-  const A = [];
-  const b = [];
-  for (let i = 0; i < 4; i++) {
-    const dx = dst[i].x, dy = dst[i].y;
-    const sx = src[i].x, sy = src[i].y;
-    A.push([dx, dy, 1, 0, 0, 0, -sx * dx, -sx * dy]);
-    b.push(sx);
-    A.push([0, 0, 0, dx, dy, 1, -sy * dx, -sy * dy]);
-    b.push(sy);
-  }
-
-  // solve using Gaussian elimination
-  const n = 8;
-  const aug = A.map((row, i) => [...row, b[i]]);
-
-  for (let col = 0; col < n; col++) {
-    // partial pivoting
-    let maxRow = col;
-    for (let row = col + 1; row < n; row++) {
-      if (Math.abs(aug[row][col]) > Math.abs(aug[maxRow][col])) maxRow = row;
-    }
-    [aug[col], aug[maxRow]] = [aug[maxRow], aug[col]];
-
-    const pivot = aug[col][col];
-    if (Math.abs(pivot) < 1e-10) continue;
-
-    for (let j = col; j <= n; j++) aug[col][j] /= pivot;
-    for (let row = 0; row < n; row++) {
-      if (row === col) continue;
-      const factor = aug[row][col];
-      for (let j = col; j <= n; j++) aug[row][j] -= factor * aug[col][j];
-    }
-  }
-
-  const h = aug.map(row => row[n]);
-  // return as [a,b,c, d,e,f, g,h,1] — the 3x3 matrix in row-major order
-  return [h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7], 1];
-}
-
-// auto edge detection — tries to find the page boundary
-// uses grayscale + Sobel edge filter + contour voting
-function detectPageEdges(canvas) {
-  const ctx = canvas.getContext('2d');
-  const w = canvas.width, h = canvas.height;
-  const imgData = ctx.getImageData(0, 0, w, h);
-  const px = imgData.data;
-
-  // convert to grayscale intensity array
-  const gray = new Float32Array(w * h);
-  for (let i = 0; i < gray.length; i++) {
-    gray[i] = px[i * 4] * 0.299 + px[i * 4 + 1] * 0.587 + px[i * 4 + 2] * 0.114;
-  }
-
-  // Sobel edge magnitude
-  const edges = new Float32Array(w * h);
-  for (let y = 1; y < h - 1; y++) {
-    for (let x = 1; x < w - 1; x++) {
-      const idx = y * w + x;
-      // horizontal gradient
-      const gx = -gray[idx - w - 1] + gray[idx - w + 1]
-               - 2 * gray[idx - 1] + 2 * gray[idx + 1]
-               - gray[idx + w - 1] + gray[idx + w + 1];
-      // vertical gradient
-      const gy = -gray[idx - w - 1] - 2 * gray[idx - w] - gray[idx - w + 1]
-               + gray[idx + w - 1] + 2 * gray[idx + w] + gray[idx + w + 1];
-      edges[idx] = Math.sqrt(gx * gx + gy * gy);
-    }
-  }
-
-  // find the edge threshold — use the 85th percentile of edge values
-  const sorted = Array.from(edges).sort((a, b) => a - b);
-  const threshold = sorted[Math.floor(sorted.length * 0.85)];
-  if (threshold < 15) return null; // image is too uniform, can't detect edges
-
-  // scan from each side inward to find where the strong edges are
-  // this gives us a rough bounding region for the page
-  function scanFromLeft(row) {
-    for (let x = 0; x < w * 0.4; x++) {
-      if (edges[row * w + x] > threshold) return x / w;
-    }
-    return 0.05;
-  }
-  function scanFromRight(row) {
-    for (let x = w - 1; x > w * 0.6; x--) {
-      if (edges[row * w + x] > threshold) return x / w;
-    }
-    return 0.95;
-  }
-  function scanFromTop(col) {
-    for (let y = 0; y < h * 0.4; y++) {
-      if (edges[y * w + col] > threshold) return y / h;
-    }
-    return 0.05;
-  }
-  function scanFromBottom(col) {
-    for (let y = h - 1; y > h * 0.6; y--) {
-      if (edges[y * w + col] > threshold) return y / h;
-    }
-    return 0.95;
-  }
-
-  // sample multiple scan lines and average for stability
-  const scanRows = [0.2, 0.35, 0.5, 0.65, 0.8].map(f => Math.floor(f * h));
-  const scanCols = [0.2, 0.35, 0.5, 0.65, 0.8].map(f => Math.floor(f * w));
-
-  const lefts = scanRows.map(r => scanFromLeft(r));
-  const rights = scanRows.map(r => scanFromRight(r));
-  const tops = scanCols.map(c => scanFromTop(c));
-  const bottoms = scanCols.map(c => scanFromBottom(c));
-
-  // take the median of each edge scan
-  function median(arr) {
-    const s = [...arr].sort((a, b) => a - b);
-    return s[Math.floor(s.length / 2)];
-  }
-
-  const left = median(lefts);
-  const right = median(rights);
-  const top = median(tops);
-  const bottom = median(bottoms);
-
-  // sanity check — the detected region should be at least 20% of the image
-  if (right - left < 0.2 || bottom - top < 0.2) return null;
-
-  return [
-    { x: left, y: top },
-    { x: right, y: top },
-    { x: right, y: bottom },
-    { x: left, y: bottom }
-  ];
-}
-
-// update the SVG overlay that shows the quad outline and grays out the outside
-function updatePerspOverlay() {
-  const canvas = document.getElementById('perspCanvas');
-  const svg = document.getElementById('perspOverlay');
-  const cr = canvas.getBoundingClientRect();
-  const wr = document.getElementById('perspWorkspace').getBoundingClientRect();
-
-  // offset of canvas within workspace
-  const ox = cr.left - wr.left;
-  const oy = cr.top - wr.top;
-
-  // corner positions in workspace pixel coordinates
-  const pts = perspCorners.map(c => ({
-    x: ox + c.x * cr.width,
-    y: oy + c.y * cr.height
-  }));
-
-  const svgW = wr.width;
-  const svgH = wr.height;
-
-  // build the SVG — a mask that grays out everything outside the quad
-  const polyPoints = pts.map(p => `${p.x},${p.y}`).join(' ');
-
-  // set explicit dimensions so the SVG covers the full workspace
-  svg.setAttribute('width', svgW);
-  svg.setAttribute('height', svgH);
-  svg.setAttribute('viewBox', `0 0 ${svgW} ${svgH}`);
-
-  svg.innerHTML = `
-    <defs>
-      <mask id="perspMask">
-        <rect width="${svgW}" height="${svgH}" fill="white"/>
-        <polygon points="${polyPoints}" fill="black"/>
-      </mask>
-    </defs>
-    <rect width="${svgW}" height="${svgH}" fill="rgba(0,0,0,0.55)" mask="url(#perspMask)"/>
-    <polygon points="${polyPoints}" fill="none" stroke="#e8b84b" stroke-width="2.5" stroke-dasharray="8,5"/>
-  `;
-}
-
-// position the draggable corner handles to match perspCorners
-function updatePerspHandles() {
-  const canvas = document.getElementById('perspCanvas');
-  const cr = canvas.getBoundingClientRect();
-  const wr = document.getElementById('perspWorkspace').getBoundingClientRect();
-  const ox = cr.left - wr.left;
-  const oy = cr.top - wr.top;
-
-  const ids = ['perspTL', 'perspTR', 'perspBR', 'perspBL'];
-  ids.forEach((id, i) => {
-    const el = document.getElementById(id);
-    el.style.left = (ox + perspCorners[i].x * cr.width) + 'px';
-    el.style.top = (oy + perspCorners[i].y * cr.height) + 'px';
-  });
-}
-
-// make the corner handles draggable
-(function initPerspDrag() {
-  const handles = document.querySelectorAll('.persp-handle');
-  let activeCorner = -1;
-
-  function onStart(e) {
-    e.preventDefault();
-    activeCorner = Number(e.target.dataset.corner);
-  }
-
-  function onMove(e) {
-    if (activeCorner < 0) return;
-    e.preventDefault();
-    const canvas = document.getElementById('perspCanvas');
-    const cr = canvas.getBoundingClientRect();
-    const touch = e.touches ? e.touches[0] : e;
-
-    // convert screen position to fractional image coordinates
-    let fx = (touch.clientX - cr.left) / cr.width;
-    let fy = (touch.clientY - cr.top) / cr.height;
-    fx = Math.max(0, Math.min(1, fx));
-    fy = Math.max(0, Math.min(1, fy));
-
-    perspCorners[activeCorner] = { x: fx, y: fy };
-    updatePerspOverlay();
-    updatePerspHandles();
-  }
-
-  function onEnd() {
-    activeCorner = -1;
-  }
-
-  handles.forEach(h => {
-    h.addEventListener('mousedown', onStart);
-    h.addEventListener('touchstart', onStart, { passive: false });
-  });
-  document.addEventListener('mousemove', onMove);
-  document.addEventListener('touchmove', onMove, { passive: false });
-  document.addEventListener('mouseup', onEnd);
-  document.addEventListener('touchend', onEnd);
-})();
-
-// reposition handles and overlay when window resizes
-window.addEventListener('resize', () => {
-  if (!document.getElementById('perspective').classList.contains('hidden')) {
-    updatePerspOverlay();
-    updatePerspHandles();
-  }
 });
 
 // ── ENHANCE ──

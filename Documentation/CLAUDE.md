@@ -77,7 +77,6 @@ All screens are `position: fixed; inset: 0`.
 | `#home`    | Main entry, capture/import/gallery   |
 | `#camera`  | Live camera viewfinder               |
 | `#crop`    | Crop workspace                       |
-| `#perspective` | Edge detection & perspective warp  |
 | `#enhance` | Image enhancement presets & sliders   |
 | `#gallery` | Saved images grid                    |
 
@@ -128,7 +127,7 @@ See `IMPLEMENTATION_PLAN.md` for full detail. Summary:
 | 1     | PWA (manifest, SW)       | ✅ Complete |
 | 2     | Crop workspace upgrades  | ✅ Complete |
 | 3     | Image enhancement        | ✅ Complete |
-| 3.5   | Perspective correction   | ✅ Complete |
+| 3.5   | Perspective correction   | ❌ Cut      |
 | 4     | OCR (Tesseract.js)       | ⬜          |
 | 5     | Share & export           | ⬜          |
 
