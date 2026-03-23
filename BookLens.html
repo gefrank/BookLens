@@ -390,17 +390,17 @@
   .gallery-item-actions {
     position: absolute; bottom: 0; left: 0; right: 0;
     background: linear-gradient(0deg, rgba(0,0,0,0.9) 0%, transparent 100%);
-    padding: 20px 8px 8px;
-    display: flex; gap: 6px; justify-content: flex-end;
+    padding: 20px 6px 6px;
+    display: flex; gap: 4px; justify-content: flex-end; flex-wrap: wrap;
     opacity: 0; transition: opacity 0.2s;
   }
   .gallery-item:hover .gallery-item-actions,
   .gallery-item.selected .gallery-item-actions { opacity: 1; }
   .item-btn {
     background: rgba(200,144,42,0.2); border: 1px solid var(--amber-dim);
-    color: var(--amber); padding: 4px 8px; border-radius: 2px;
-    font-size: 10px; cursor: pointer; font-family: 'JetBrains Mono', monospace;
-    letter-spacing: 0.5px;
+    color: var(--amber); padding: 4px 6px; border-radius: 2px;
+    font-size: 9px; cursor: pointer; font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.3px; white-space: nowrap;
   }
   .item-btn:active { background: var(--amber-dim); }
   .empty-gallery {
