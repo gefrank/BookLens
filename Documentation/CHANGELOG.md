@@ -2,6 +2,28 @@
 
 ---
 
+## v0.4.0 — 2026-03-23
+
+Image Enhancement — the Microsoft Lens "document scan" look.
+
+### Added
+- New **Enhance** screen between capture and crop in the workflow
+- Preset modes: **Original**, **Auto**, **Document**, **Photo**, **B&W**
+- Manual sliders: Brightness (-100 to +100), Contrast (-100 to +100), Sharpness (0–100)
+- Real-time canvas preview with 100ms debounce
+- Auto-levels algorithm (per-channel histogram stretch, 1st/99th percentile)
+- Document mode: auto-levels + 70% desaturate + high contrast + sharpen
+- 3×3 sharpening kernel with adjustable strength
+- "Skip" button to bypass enhancement and go straight to crop
+- Full-resolution processing on "Apply" (preview works at reduced res for speed)
+- Processing spinner during heavy canvas operations
+
+### Changed
+- Capture and import now route through Enhance screen before Crop
+- Flow is now: Capture/Import → Enhance → Crop → Save
+
+---
+
 ## v0.3.0 — 2026-03-23
 
 Crop Workspace Upgrades — precision cropping on mobile is now practical.

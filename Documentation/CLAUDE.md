@@ -77,6 +77,7 @@ All screens are `position: fixed; inset: 0`.
 | `#home`    | Main entry, capture/import/gallery   |
 | `#camera`  | Live camera viewfinder               |
 | `#crop`    | Crop workspace                       |
+| `#enhance` | Image enhancement presets & sliders   |
 | `#gallery` | Saved images grid                    |
 
 ### Adding screens
@@ -125,7 +126,7 @@ See `IMPLEMENTATION_PLAN.md` for full detail. Summary:
 | 0     | Core app (camera, crop)  | ✅ Complete |
 | 1     | PWA (manifest, SW)       | ✅ Complete |
 | 2     | Crop workspace upgrades  | ✅ Complete |
-| 3     | Image enhancement        | ⬜ Next     |
+| 3     | Image enhancement        | ✅ Complete |
 | 3.5   | Perspective correction   | ⬜          |
 | 4     | OCR (Tesseract.js)       | ⬜          |
 | 5     | Share & export           | ⬜          |
