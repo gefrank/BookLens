@@ -154,6 +154,19 @@
   }
   #canvas { display: none; }
 
+  /* live edge detection overlay on the camera viewfinder */
+  #cameraWrap {
+    position: relative; flex: 1; overflow: hidden;
+  }
+  #cameraWrap video {
+    width: 100%; height: 100%; object-fit: cover; display: block;
+  }
+  #edgeOverlay {
+    position: absolute; inset: 0;
+    pointer-events: none;
+    z-index: 2;
+  }
+
   /* ── CROP ── */
   #crop {
     background: #0a0805;
@@ -526,7 +539,10 @@
 
 <!-- CAMERA -->
 <div id="camera" class="screen hidden">
-  <video id="video" autoplay playsinline muted></video>
+  <div id="cameraWrap">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="edgeOverlay"></canvas>
+  </div>
   <canvas id="canvas"></canvas>
   <div class="camera-controls">
     <button class="cam-side-btn" onclick="stopCamera(); showScreen('home')" title="Back">✕</button>
@@ -686,6 +702,9 @@ function updateCount() {
 }
 
 // ── CAMERA ──
+let edgeDetectTimer = null;
+let lastDetectedQuad = null; // smoothed quad corners for the overlay
+
 async function startCamera() {
   showScreen('camera');
   try {
@@ -694,7 +713,20 @@ async function startCamera() {
       video: { facingMode: 'environment', width: { ideal: 2048 }, height: { ideal: 2048 } },
       audio: false
     });
-    document.getElementById('video').srcObject = stream;
+    const video = document.getElementById('video');
+    video.srcObject = stream;
+
+    // once video is playing, request continuous autofocus if the device supports it
+    video.addEventListener('loadedmetadata', () => {
+      const track = stream.getVideoTracks()[0];
+      const caps = track.getCapabilities ? track.getCapabilities() : {};
+      if (caps.focusMode && caps.focusMode.includes('continuous')) {
+        track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
+      }
+    }, { once: true });
+
+    // start the live edge detection loop
+    startEdgeDetection();
   } catch(e) {
     showToast('Camera access denied');
     showScreen('home');
@@ -703,6 +735,116 @@ async function startCamera() {
 
 function stopCamera() {
   if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  stopEdgeDetection();
+}
+
+// ── LIVE EDGE DETECTION ──
+// runs every ~300ms, grabs a frame from the video, detects edges, draws the overlay
+
+function startEdgeDetection() {
+  stopEdgeDetection();
+  lastDetectedQuad = null;
+  edgeDetectTimer = setInterval(detectEdgesFromVideo, 300);
+}
+
+function stopEdgeDetection() {
+  if (edgeDetectTimer) { clearInterval(edgeDetectTimer); edgeDetectTimer = null; }
+  // clear the overlay when leaving camera
+  const overlay = document.getElementById('edgeOverlay');
+  if (overlay) {
+    const ctx = overlay.getContext('2d');
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+  }
+}
+
+function detectEdgesFromVideo() {
+  const video = document.getElementById('video');
+  if (!video || video.readyState < 2 || !stream) return;
+
+  // downsample to a small canvas for fast processing
+  const sampleW = 240;
+  const sampleH = Math.round(sampleW * (video.videoHeight / video.videoWidth));
+  const tmpCanvas = document.createElement('canvas');
+  tmpCanvas.width = sampleW;
+  tmpCanvas.height = sampleH;
+  const tmpCtx = tmpCanvas.getContext('2d');
+  tmpCtx.drawImage(video, 0, 0, sampleW, sampleH);
+
+  // run edge detection on the small frame
+  const quad = detectPageEdges(tmpCanvas);
+
+  // smooth the corners so the overlay doesn't jitter too much between frames
+  if (quad) {
+    if (lastDetectedQuad) {
+      // lerp toward the new detection for stability
+      const smooth = 0.4;
+      lastDetectedQuad = lastDetectedQuad.map((prev, i) => ({
+        x: prev.x + (quad[i].x - prev.x) * smooth,
+        y: prev.y + (quad[i].y - prev.y) * smooth
+      }));
+    } else {
+      lastDetectedQuad = quad;
+    }
+  }
+  // if no quad detected, keep showing the last one (or nothing)
+
+  drawEdgeOverlay();
+}
+
+function drawEdgeOverlay() {
+  const overlay = document.getElementById('edgeOverlay');
+  const wrap = document.getElementById('cameraWrap');
+  if (!overlay || !wrap) return;
+
+  const w = wrap.clientWidth;
+  const h = wrap.clientHeight;
+  overlay.width = w;
+  overlay.height = h;
+
+  const ctx = overlay.getContext('2d');
+  ctx.clearRect(0, 0, w, h);
+
+  if (!lastDetectedQuad) return;
+
+  // convert fractional coordinates to pixel coordinates on the overlay
+  const pts = lastDetectedQuad.map(c => ({ x: c.x * w, y: c.y * h }));
+
+  // draw the semi-transparent grey mask outside the detected page
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+  ctx.beginPath();
+  // outer rectangle (full frame)
+  ctx.moveTo(0, 0);
+  ctx.lineTo(w, 0);
+  ctx.lineTo(w, h);
+  ctx.lineTo(0, h);
+  ctx.closePath();
+  // inner quad (the page) — wound in reverse so it cuts a hole
+  ctx.moveTo(pts[0].x, pts[0].y);
+  ctx.lineTo(pts[3].x, pts[3].y);
+  ctx.lineTo(pts[2].x, pts[2].y);
+  ctx.lineTo(pts[1].x, pts[1].y);
+  ctx.closePath();
+  ctx.fill('evenodd');
+
+  // draw the quad border
+  ctx.strokeStyle = '#e8b84b';
+  ctx.lineWidth = 2.5;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  ctx.lineTo(pts[1].x, pts[1].y);
+  ctx.lineTo(pts[2].x, pts[2].y);
+  ctx.lineTo(pts[3].x, pts[3].y);
+  ctx.closePath();
+  ctx.stroke();
+
+  // draw corner dots so the user can see the anchor points
+  ctx.fillStyle = '#e8b84b';
+  pts.forEach(p => {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+    ctx.fill();
+  });
 }
 
 function capturePhoto() {
@@ -749,11 +891,17 @@ function openPerspective(dataURL) {
     canvas.height = Math.round(perspSourceImg.naturalHeight * scale);
     canvas.getContext('2d').drawImage(perspSourceImg, 0, 0, canvas.width, canvas.height);
 
-    // try to auto-detect page edges, fall back to generous defaults
-    perspCorners = detectPageEdges(canvas) || [
-      { x: 0.05, y: 0.05 }, { x: 0.95, y: 0.05 },
-      { x: 0.95, y: 0.95 }, { x: 0.05, y: 0.95 }
-    ];
+    // use the quad from the live camera detection if we have it,
+    // otherwise run detection fresh (e.g. for imported images)
+    if (lastDetectedQuad) {
+      perspCorners = lastDetectedQuad.map(c => ({ ...c }));
+      lastDetectedQuad = null;
+    } else {
+      perspCorners = detectPageEdges(canvas) || [
+        { x: 0.05, y: 0.05 }, { x: 0.95, y: 0.05 },
+        { x: 0.95, y: 0.95 }, { x: 0.05, y: 0.95 }
+      ];
+    }
 
     showScreen('perspective');
     // need a solid delay so the screen transition finishes and layout is stable
