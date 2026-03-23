@@ -154,27 +154,6 @@
   }
   #canvas { display: none; }
 
-  /* focus indicator — appears when you tap to focus */
-  .focus-ring {
-    position: absolute;
-    width: 70px; height: 70px;
-    border: 2px solid var(--amber-light);
-    border-radius: 50%;
-    pointer-events: none;
-    transform: translate(-50%, -50%) scale(1.4);
-    opacity: 0;
-    transition: transform 0.25s ease-out, opacity 0.25s;
-    z-index: 5;
-  }
-  .focus-ring.active {
-    transform: translate(-50%, -50%) scale(1);
-    opacity: 1;
-  }
-  .focus-ring.locked {
-    border-color: var(--amber);
-    transform: translate(-50%, -50%) scale(0.85);
-  }
-
   /* ── CROP ── */
   #crop {
     background: #0a0805;
@@ -334,8 +313,7 @@
   }
   #perspCanvas {
     max-width: 100%; max-height: 100%;
-    object-fit: contain;
-    position: absolute;
+    display: block;
   }
   /* SVG overlay for the quad outline and grayed-out mask */
   #perspOverlay {
@@ -548,10 +526,7 @@
 
 <!-- CAMERA -->
 <div id="camera" class="screen hidden">
-  <div style="position:relative; flex:1; overflow:hidden;">
-    <video id="video" autoplay playsinline muted style="width:100%; height:100%; object-fit:cover;"></video>
-    <div class="focus-ring" id="focusRing"></div>
-  </div>
+  <video id="video" autoplay playsinline muted></video>
   <canvas id="canvas"></canvas>
   <div class="camera-controls">
     <button class="cam-side-btn" onclick="stopCamera(); showScreen('home')" title="Back">✕</button>
@@ -730,48 +705,6 @@ function stopCamera() {
   if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
 }
 
-// tap-to-focus — shows a ring where you tapped and triggers autofocus if supported
-(function initTapToFocus() {
-  const videoWrap = document.querySelector('#camera > div');
-  if (!videoWrap) return;
-
-  videoWrap.addEventListener('click', async (e) => {
-    const ring = document.getElementById('focusRing');
-    const rect = videoWrap.getBoundingClientRect();
-
-    // position the ring where the user tapped
-    ring.style.left = (e.clientX - rect.left) + 'px';
-    ring.style.top = (e.clientY - rect.top) + 'px';
-
-    // animate: appear → shrink to "locked" → fade out
-    ring.classList.remove('active', 'locked');
-    void ring.offsetWidth; // force reflow so the animation replays
-    ring.classList.add('active');
-
-    // try to use the focusMode API if the device supports it
-    if (stream) {
-      const track = stream.getVideoTracks()[0];
-      const capabilities = track.getCapabilities ? track.getCapabilities() : {};
-      if (capabilities.focusMode && capabilities.focusMode.includes('manual')) {
-        try {
-          // calculate where the tap lands in normalized coordinates
-          const pointX = (e.clientX - rect.left) / rect.width;
-          const pointY = (e.clientY - rect.top) / rect.height;
-          await track.applyConstraints({
-            advanced: [{ focusMode: 'manual', pointsOfInterest: [{ x: pointX, y: pointY }] }]
-          });
-        } catch (_) {
-          // not all devices support point-of-interest focus, that's fine
-        }
-      }
-    }
-
-    // show the "locked" state briefly, then fade out
-    setTimeout(() => ring.classList.add('locked'), 300);
-    setTimeout(() => ring.classList.remove('active', 'locked'), 1200);
-  });
-})();
-
 function capturePhoto() {
   const video = document.getElementById('video');
   const canvas = document.getElementById('canvas');
@@ -823,11 +756,12 @@ function openPerspective(dataURL) {
     ];
 
     showScreen('perspective');
-    // small delay so layout settles before positioning the handles
-    requestAnimationFrame(() => {
+    // need a solid delay so the screen transition finishes and layout is stable
+    // before we try to read getBoundingClientRect on the canvas
+    setTimeout(() => {
       updatePerspOverlay();
       updatePerspHandles();
-    });
+    }, 350);
   };
   perspSourceImg.src = dataURL;
 }
@@ -1076,6 +1010,11 @@ function updatePerspOverlay() {
   // build the SVG — a mask that grays out everything outside the quad
   const polyPoints = pts.map(p => `${p.x},${p.y}`).join(' ');
 
+  // set explicit dimensions so the SVG covers the full workspace
+  svg.setAttribute('width', svgW);
+  svg.setAttribute('height', svgH);
+  svg.setAttribute('viewBox', `0 0 ${svgW} ${svgH}`);
+
   svg.innerHTML = `
     <defs>
       <mask id="perspMask">
@@ -1084,7 +1023,7 @@ function updatePerspOverlay() {
       </mask>
     </defs>
     <rect width="${svgW}" height="${svgH}" fill="rgba(0,0,0,0.55)" mask="url(#perspMask)"/>
-    <polygon points="${polyPoints}" fill="none" stroke="#e8b84b" stroke-width="2" stroke-dasharray="6,4"/>
+    <polygon points="${polyPoints}" fill="none" stroke="#e8b84b" stroke-width="2.5" stroke-dasharray="8,5"/>
   `;
 }
 
