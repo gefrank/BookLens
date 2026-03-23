@@ -1428,12 +1428,21 @@ function saveCrop() {
     localStorage.setItem('booklens_saves', JSON.stringify(saved));
     updateCount();
 
-    const a = document.createElement('a');
-    a.href = finalURL;
-    a.download = `booklens_${ts}.jpg`;
-    a.click();
+    // save to gallery and immediately open share sheet so it goes to Drive
+    const file = dataURLtoFile(finalURL, `booklens_${ts}.jpg`);
 
-    showToast('Saved to Downloads ✓');
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      navigator.share({ files: [file], title: 'BookLens Quote' }).catch(() => {});
+      showToast('Saved ✓');
+    } else {
+      // fallback to download if share isn't available
+      const a = document.createElement('a');
+      a.href = finalURL;
+      a.download = `booklens_${ts}.jpg`;
+      a.click();
+      showToast('Saved to Downloads ✓');
+    }
+
     showScreen('home');
   };
   tmpImg.src = src;
